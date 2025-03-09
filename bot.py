@@ -1,13 +1,12 @@
 import os
 import io
 import logging
-import re
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import asyncio
 import httpx
-import html
+import re
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ParseMode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
 from telegram.error import BadRequest
 
@@ -24,9 +23,8 @@ logger = logging.getLogger(__name__)
 # States for conversation handler
 MAIN_MENU, ANALYZING, UPLOADING, LANGUAGE_SELECTION = range(4)
 
-# Direct API keys (since this is a personal project)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with your actual Telegram bot token
-GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")    # Replace with your actual Google API key
+GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")        # Replace with your actual Google API key
 
 class SimplePDFBot:
     """A user-friendly Telegram bot for PDF analysis using Google's Gemini model."""
@@ -47,34 +45,6 @@ class SimplePDFBot:
         
         # Add handlers
         self.add_handlers()
-        
-        # Unsupported HTML tags that need to be replaced
-        self.unsupported_tags = {
-            'sub': '_',       # subscript to underscore
-            'sup': '^',       # superscript to caret
-            'h1': 'b',        # headers to bold
-            'h2': 'b',
-            'h3': 'b',
-            'h4': 'b',
-            'h5': 'b',
-            'h6': 'b',
-            'em': 'i',        # emphasis to italic
-            'strong': 'b',    # strong to bold
-            'table': None,    # tables and related tags are removed
-            'tr': None,
-            'td': None,
-            'th': None,
-            'thead': None,
-            'tbody': None,
-            'div': None,      # div to nothing (keep content)
-            'span': None,     # span to nothing (keep content)
-            'p': None,        # paragraph to nothing (keep content)
-            'br': '\n',       # line break to newline
-            'hr': '\n—————\n', # horizontal rule to dashes
-            'img': '[IMAGE]',  # image to text placeholder
-            'figure': None,    # figure to nothing
-            'figcaption': 'i', # figcaption to italic
-        }
     
     def add_handlers(self):
         """Add command and message handlers to the application."""
@@ -119,286 +89,6 @@ class SimplePDFBot:
         
         # Error handler
         self.application.add_error_handler(self.error_handler)
-    
-    def sanitize_html(self, text: str) -> str:
-        """
-        Sanitize HTML content to make it compatible with Telegram's HTML parser.
-        Removes or replaces unsupported HTML tags.
-        """
-        if not text:
-            return ""
-        
-        # First, escape any HTML entities that might be in the text
-        text = html.escape(text)
-        
-        # Then unescape the basic HTML tags that Telegram supports
-        for tag in ['b', 'i', 'u', 's', 'code', 'pre', 'a']:
-            text = text.replace(f'&lt;{tag}&gt;', f'<{tag}>')
-            text = text.replace(f'&lt;/{tag}&gt;', f'</{tag}>')
-            # Also handle tags with attributes (simplified approach)
-            text = re.sub(f'&lt;{tag}\\s+([^&]*)&gt;', f'<{tag} \\1>', text)
-        
-        # Handle link tags specially
-        text = re.sub(r'&lt;a\s+href=&quot;([^&]*)&quot;&gt;', r'<a href="\1">', text)
-        
-        # Replace unsupported tags with supported alternatives or remove them
-        for tag, replacement in self.unsupported_tags.items():
-            if replacement is None:
-                # Remove the tag but keep its content
-                text = re.sub(f'<{tag}[^>]*>(.*?)</{tag}>', r'\1', text, flags=re.DOTALL)
-                text = re.sub(f'<{tag}[^>]*>', '', text)
-                text = re.sub(f'</{tag}>', '', text)
-            elif replacement == '\n':
-                # Replace with newline
-                text = re.sub(f'<{tag}[^>]*>', replacement, text)
-            else:
-                # Replace with another tag
-                text = re.sub(f'<{tag}[^>]*>(.*?)</{tag}>', f'<{replacement}>\\1</{replacement}>', text, flags=re.DOTALL)
-        
-        # Handle special characters and mathematical symbols
-        text = text.replace('&lt;', '<').replace('&gt;', '>')
-        
-        # Replace common mathematical notations
-        math_replacements = {
-            # Subscripts
-            '<sub>': '_',
-            '</sub>': '',
-            # Superscripts
-            '<sup>': '^',
-            '</sup>': '',
-            # Greek letters (common ones)
-            'α': 'alpha',
-            'β': 'beta',
-            'γ': 'gamma',
-            'δ': 'delta',
-            'ε': 'epsilon',
-            'θ': 'theta',
-            'λ': 'lambda',
-            'μ': 'mu',
-            'π': 'pi',
-            'σ': 'sigma',
-            'τ': 'tau',
-            'φ': 'phi',
-            'ω': 'omega',
-            # Math symbols
-            '±': '+/-',
-            '×': 'x',
-            '÷': '/',
-            '≈': '~=',
-            '≠': '!=',
-            '≤': '<=',
-            '≥': '>=',
-            '∞': 'inf',
-            '∑': 'sum',
-            '∏': 'prod',
-            '∫': 'int',
-            '∂': 'partial',
-            '√': 'sqrt',
-            '∛': 'cbrt',
-            '∝': 'prop to',
-        }
-        
-        for symbol, replacement in math_replacements.items():
-            text = text.replace(symbol, replacement)
-        
-        # Handle tables by converting them to plain text format
-        # This is a simplified approach - tables will lose their structure
-        if '<table' in text:
-            # Extract table content and format it as plain text
-            table_pattern = r'<table[^>]*>(.*?)</table>'
-            for table_match in re.finditer(table_pattern, text, re.DOTALL):
-                table_content = table_match.group(1)
-                # Replace table rows with newlines
-                table_content = re.sub(r'<tr[^>]*>(.*?)</tr>', r'\1\n', table_content, flags=re.DOTALL)
-                # Replace table cells with tab-separated text
-                table_content = re.sub(r'<t[hd][^>]*>(.*?)</t[hd]>', r'\1\t', table_content, flags=re.DOTALL)
-                # Replace the table with the formatted content
-                text = text.replace(table_match.group(0), f"\n{table_content}\n")
-        
-        # Remove any remaining HTML tags
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Fix common issues with Telegram's HTML parser
-        # Double newlines for paragraph breaks
-        text = re.sub(r'\n\s*\n', '\n\n', text)
-        
-        # Ensure we don't have more than 2 consecutive newlines
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        
-        return text
-    
-    async def send_safe_message(self, chat_id: int, text: str, reply_markup=None, parse_mode=ParseMode.HTML) -> Any:
-        """
-        Send a message with safe HTML parsing, handling any formatting errors.
-        Falls back to plain text if HTML parsing fails.
-        """
-        try:
-            # First try with the original text and HTML parsing
-            return await self.application.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
-        except BadRequest as e:
-            logger.warning(f"HTML parsing error: {e}")
-            
-            if "Can't parse entities" in str(e):
-                # Try with sanitized HTML
-                sanitized_text = self.sanitize_html(text)
-                try:
-                    return await self.application.bot.send_message(
-                        chat_id=chat_id,
-                        text=sanitized_text,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode
-                    )
-                except BadRequest as e2:
-                    logger.warning(f"Still can't parse entities after sanitization: {e2}")
-                    
-                    # As a last resort, send without parse_mode
-                    return await self.application.bot.send_message(
-                        chat_id=chat_id,
-                        text=sanitized_text,
-                        reply_markup=reply_markup,
-                        parse_mode=None
-                    )
-            else:
-                # For other types of errors, re-raise
-                raise
-    
-    async def edit_safe_message(self, chat_id: int, message_id: int, text: str, reply_markup=None, parse_mode=ParseMode.HTML) -> Any:
-        """
-        Edit a message with safe HTML parsing, handling any formatting errors.
-        Falls back to plain text if HTML parsing fails.
-        """
-        try:
-            # First try with the original text and HTML parsing
-            return await self.application.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
-        except BadRequest as e:
-            logger.warning(f"HTML parsing error in edit: {e}")
-            
-            if "Can't parse entities" in str(e):
-                # Try with sanitized HTML
-                sanitized_text = self.sanitize_html(text)
-                try:
-                    return await self.application.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=sanitized_text,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode
-                    )
-                except BadRequest as e2:
-                    logger.warning(f"Still can't parse entities after sanitization: {e2}")
-                    
-                    # As a last resort, send without parse_mode
-                    return await self.application.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=sanitized_text,
-                        reply_markup=reply_markup,
-                        parse_mode=None
-                    )
-            elif "Message is not modified" in str(e):
-                # Message content is the same, ignore this error
-                logger.info("Message not modified, ignoring")
-                return None
-            else:
-                # For other types of errors, re-raise
-                raise
-    
-    async def split_and_send_long_message(self, update: Update, text: str, title: str = "", reply_markup=None) -> List[int]:
-        """
-        Split long messages and send them in chunks.
-        Returns a list of message IDs that were sent.
-        """
-        user_id = update.effective_user.id
-        chat_id = update.effective_chat.id
-        message_ids = []
-        
-        # Maximum message length for Telegram
-        max_length = 4000
-        
-        # If the message is short enough, send it as is
-        if len(text) <= max_length:
-            message = await self.send_safe_message(
-                chat_id=chat_id,
-                text=f"{title}\n\n{text}" if title else text,
-                reply_markup=reply_markup
-            )
-            message_ids.append(message.message_id)
-            self.add_message_to_cleanup(user_id, message.message_id)
-            return message_ids
-        
-        # Split by paragraphs first to maintain readability
-        paragraphs = text.split('\n\n')
-        chunks = []
-        current_chunk = ""
-        
-        for paragraph in paragraphs:
-            # If adding this paragraph would exceed the limit, start a new chunk
-            if len(current_chunk) + len(paragraph) + 2 > max_length:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = paragraph
-            else:
-                if current_chunk:
-                    current_chunk += '\n\n'
-                current_chunk += paragraph
-        
-        # Add the last chunk if it's not empty
-        if current_chunk:
-            chunks.append(current_chunk)
-        
-        # If we still have chunks that are too long, split them further
-        final_chunks = []
-        for chunk in chunks:
-            if len(chunk) <= max_length:
-                final_chunks.append(chunk)
-            else:
-                # Split by sentences or just characters if needed
-                sentences = re.split(r'(?<=[.!?])\s+', chunk)
-                sub_chunk = ""
-                for sentence in sentences:
-                    if len(sub_chunk) + len(sentence) + 1 > max_length:
-                        if sub_chunk:
-                            final_chunks.append(sub_chunk)
-                        # If a single sentence is too long, split it by characters
-                        if len(sentence) > max_length:
-                            for i in range(0, len(sentence), max_length):
-                                final_chunks.append(sentence[i:i+max_length])
-                        else:
-                            sub_chunk = sentence
-                    else:
-                        if sub_chunk:
-                            sub_chunk += ' '
-                        sub_chunk += sentence
-                if sub_chunk:
-                    final_chunks.append(sub_chunk)
-        
-        # Send each chunk
-        for i, chunk in enumerate(final_chunks):
-            part_title = f"{title} (phần {i+1}/{len(final_chunks)})" if title else f"Phần {i+1}/{len(final_chunks)}"
-            
-            # Only add reply_markup to the last chunk
-            current_markup = reply_markup if i == len(final_chunks) - 1 else None
-            
-            message = await self.send_safe_message(
-                chat_id=chat_id,
-                text=f"{part_title}\n\n{chunk}",
-                reply_markup=current_markup
-            )
-            message_ids.append(message.message_id)
-            self.add_message_to_cleanup(user_id, message.message_id)
-        
-        return message_ids
     
     async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """General handler for all callback queries."""
@@ -652,27 +342,26 @@ class SimplePDFBot:
         if update.callback_query:
             try:
                 await update.callback_query.answer()
-                message = await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=update.callback_query.message.message_id,
-                    text=menu_text,
-                    reply_markup=reply_markup
+                message = await update.callback_query.edit_message_text(
+                    menu_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
                 )
                 # No need to track edited messages
             except BadRequest as e:
                 # If we can't edit (e.g., message is too old), send a new one
                 logger.info(f"Could not edit message: {e}")
-                message = await self.send_safe_message(
-                    chat_id=update.effective_chat.id,
-                    text=menu_text,
-                    reply_markup=reply_markup
+                message = await update.effective_chat.send_message(
+                    menu_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
                 )
                 self.add_message_to_cleanup(user_id, message.message_id)
         else:
-            message = await self.send_safe_message(
-                chat_id=update.effective_chat.id,
-                text=menu_text,
-                reply_markup=reply_markup
+            message = await update.effective_chat.send_message(
+                menu_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
             self.add_message_to_cleanup(user_id, message.message_id)
         
@@ -704,10 +393,9 @@ class SimplePDFBot:
                 "Type /back to return to the main menu."
             )
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=upload_text
+            await query.edit_message_text(
+                upload_text,
+                parse_mode="HTML"
             )
             return UPLOADING
         
@@ -719,10 +407,8 @@ class SimplePDFBot:
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text="🌐 Please select your language / Vui lòng chọn ngôn ngữ:",
+            await query.edit_message_text(
+                "🌐 Please select your language / Vui lòng chọn ngôn ngữ:",
                 reply_markup=reply_markup
             )
             return LANGUAGE_SELECTION
@@ -751,12 +437,7 @@ class SimplePDFBot:
             keyboard.append([InlineKeyboardButton(back_text, callback_data="menu_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=message,
-                reply_markup=reply_markup
-            )
+            await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
             return MAIN_MENU
         
         elif data == "menu_analyze":
@@ -769,10 +450,8 @@ class SimplePDFBot:
                 
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=no_doc_text,
+                await query.edit_message_text(
+                    no_doc_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
@@ -807,11 +486,10 @@ class SimplePDFBot:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=analyze_text,
-                reply_markup=reply_markup
+            await query.edit_message_text(
+                analyze_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
             
             return ANALYZING
@@ -826,10 +504,8 @@ class SimplePDFBot:
                 
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=no_doc_text,
+                await query.edit_message_text(
+                    no_doc_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
@@ -859,10 +535,9 @@ class SimplePDFBot:
                     f"Type /back to return to the main menu."
                 )
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=ask_text
+            await query.edit_message_text(
+                ask_text,
+                parse_mode="HTML"
             )
             
             return ANALYZING
@@ -879,10 +554,8 @@ class SimplePDFBot:
                 
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=need_more_docs,
+                await query.edit_message_text(
+                    need_more_docs,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
@@ -920,11 +593,10 @@ class SimplePDFBot:
             # Store selected files in user_data
             self.user_data[user_id]["compare_selection"] = []
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=compare_text,
-                reply_markup=reply_markup
+            await query.edit_message_text(
+                compare_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
             
             return MAIN_MENU
@@ -943,10 +615,8 @@ class SimplePDFBot:
                 selected_text = f"✅ Đã chọn tài liệu: {file_name}" if is_vietnamese else f"✅ Selected document: {file_name}"
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=selected_text,
+                await query.edit_message_text(
+                    selected_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
@@ -957,6 +627,8 @@ class SimplePDFBot:
             # Extract the file name safely
             file_id = data[12:]
             file_name = self._get_filename_from_id(user_id, file_id)
+            
+          
             
             if file_name and file_name in self.user_data[user_id]["files"]:
                 # Delete the file from Google AI
@@ -976,10 +648,8 @@ class SimplePDFBot:
                 deleted_text = f"✅ Đã xóa tài liệu: {file_name}" if is_vietnamese else f"✅ Deleted document: {file_name}"
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=deleted_text,
+                await query.edit_message_text(
+                    deleted_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
@@ -1034,11 +704,10 @@ class SimplePDFBot:
                 
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=compare_text,
-                    reply_markup=reply_markup
+                await query.edit_message_text(
+                    compare_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
                 )
             return MAIN_MENU
         
@@ -1049,10 +718,8 @@ class SimplePDFBot:
                 not_enough_text = "❗ Vui lòng chọn ít nhất 2 tài liệu để so sánh." if is_vietnamese else "❗ Please select at least 2 documents to compare."
                 back_text = "🔙 Quay lại" if is_vietnamese else "🔙 Back"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=not_enough_text,
+                await query.edit_message_text(
+                    not_enough_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_compare")
                     ]])
@@ -1100,11 +767,10 @@ class SimplePDFBot:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=compare_text,
-                reply_markup=reply_markup
+            await query.edit_message_text(
+                compare_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
             
             return MAIN_MENU
@@ -1117,10 +783,8 @@ class SimplePDFBot:
                 not_enough_text = "❗ Vui lòng chọn ít nhất 2 tài liệu để so sánh." if is_vietnamese else "❗ Please select at least 2 documents to compare."
                 back_text = "🔙 Quay lại" if is_vietnamese else "🔙 Back"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=not_enough_text,
+                await query.edit_message_text(
+                    not_enough_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_compare")
                     ]])
@@ -1151,10 +815,9 @@ class SimplePDFBot:
             # Indicate processing
             processing_text = "⏳ Đang so sánh tài liệu...\n\nQuá trình này có thể mất một phút tùy thuộc vào kích thước và độ phức tạp của tài liệu." if is_vietnamese else "⏳ Comparing documents...\n\nThis may take a minute depending on the size and complexity of your documents."
             
-            processing_message = await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=processing_text
+            processing_message = await query.edit_message_text(
+                processing_text,
+                parse_mode="HTML"
             )
             
             # Compare the documents
@@ -1167,22 +830,38 @@ class SimplePDFBot:
                 
                 # Delete the processing message
                 try:
-                    await self.application.bot.delete_message(
-                        chat_id=update.effective_chat.id,
-                        message_id=query.message.message_id
-                    )
-                except Exception as e:
-                    logger.info(f"Could not delete processing message: {e}")
+                    await processing_message.delete()
+                except Exception:
+                    pass
                 
                 # Send results as a new message
                 result_title = "📊 <b>Kết quả so sánh</b>" if is_vietnamese else "📊 <b>Comparison Results</b>"
                 
-                # Use the new split and send method
-                await self.split_and_send_long_message(
-                    update=update,
-                    text=response,
-                    title=result_title
-                )
+                # Split response if it's too long
+                if len(response) > 4000:
+                    chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                    for i, chunk in enumerate(chunks):
+                        part_text = f"{result_title} (phần {i+1}/{len(chunks)})" if is_vietnamese else f"{result_title} (part {i+1}/{len(chunks)})"
+                        
+                        if i == 0:
+                            message = await query.message.reply_text(
+                                f"{part_text}\n\n{chunk}",
+                                parse_mode="HTML"
+                            )
+                            self.add_message_to_cleanup(user_id, message.message_id)
+                        else:
+                            message = await context.bot.send_message(
+                                chat_id=query.message.chat_id,
+                                text=f"{part_text}\n\n{chunk}",
+                                parse_mode="HTML"
+                            )
+                            self.add_message_to_cleanup(user_id, message.message_id)
+                else:
+                    message = await query.message.reply_text(
+                        f"{result_title}\n\n{response}",
+                        parse_mode="HTML"
+                    )
+                    self.add_message_to_cleanup(user_id, message.message_id)
                 
                 # Return to menu
                 return await self.show_menu(update, context)
@@ -1192,14 +871,13 @@ class SimplePDFBot:
                 error_text = f"❌ Lỗi khi so sánh tài liệu: {str(e)}\n\nVui lòng thử lại." if is_vietnamese else f"❌ Error comparing documents: {str(e)}\n\nPlease try again."
                 back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
                 
-                await self.edit_safe_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id,
-                    text=error_text,
+                message = await query.message.reply_text(
+                    error_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(back_text, callback_data="menu_back")
                     ]])
                 )
+                self.add_message_to_cleanup(user_id, message.message_id)
                 
                 return MAIN_MENU
         
@@ -1225,10 +903,8 @@ class SimplePDFBot:
             no_doc_text = "❗ Chưa chọn tài liệu. Vui lòng tải lên hoặc chọn một tài liệu trước." if is_vietnamese else "❗ No document selected. Please upload or select a document first."
             back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=no_doc_text,
+            await query.edit_message_text(
+                no_doc_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(back_text, callback_data="menu_back")
                 ]])
@@ -1259,10 +935,9 @@ class SimplePDFBot:
         # Indicate processing
         processing_text = f"⏳ Đang phân tích tài liệu: {file_name}...\n\nQuá trình này có thể mất một phút tùy thuộc vào kích thước và độ phức tạp của tài liệu." if is_vietnamese else f"⏳ Analyzing document: {file_name}...\n\nThis may take a minute depending on the size and complexity of your document."
         
-        processing_message = await self.edit_safe_message(
-            chat_id=update.effective_chat.id,
-            message_id=query.message.message_id,
-            text=processing_text
+        processing_message = await query.edit_message_text(
+            processing_text,
+            parse_mode="HTML"
         )
         
         # Analyze the document
@@ -1275,22 +950,38 @@ class SimplePDFBot:
             
             # Delete the processing message
             try:
-                await self.application.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=query.message.message_id
-                )
-            except Exception as e:
-                logger.info(f"Could not delete processing message: {e}")
+                await processing_message.delete()
+            except Exception:
+                pass
             
             # Send results as a new message
             result_title = "📝 <b>Kết quả phân tích</b>" if is_vietnamese else "📝 <b>Analysis Results</b>"
             
-            # Use the new split and send method
-            await self.split_and_send_long_message(
-                update=update,
-                text=response,
-                title=result_title
-            )
+            # Split response if it's too long
+            if len(response) > 4000:
+                chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                for i, chunk in enumerate(chunks):
+                    part_text = f"{result_title} (phần {i+1}/{len(chunks)})" if is_vietnamese else f"{result_title} (part {i+1}/{len(chunks)})"
+                    
+                    if i == 0:
+                        message = await query.message.reply_text(
+                            f"{part_text}\n\n{chunk}",
+                            parse_mode="HTML"
+                        )
+                        self.add_message_to_cleanup(user_id, message.message_id)
+                    else:
+                        message = await context.bot.send_message(
+                            chat_id=query.message.chat_id,
+                            text=f"{part_text}\n\n{chunk}",
+                            parse_mode="HTML"
+                        )
+                        self.add_message_to_cleanup(user_id, message.message_id)
+            else:
+                message = await query.message.reply_text(
+                    f"{result_title}\n\n{response}",
+                    parse_mode="HTML"
+                )
+                self.add_message_to_cleanup(user_id, message.message_id)
             
             # Return to menu with follow-up options
             if is_vietnamese:
@@ -1307,9 +998,8 @@ class SimplePDFBot:
                 [InlineKeyboardButton(back_button, callback_data="menu_back")]
             ]
             
-            message = await self.send_safe_message(
-                chat_id=update.effective_chat.id,
-                text=follow_up_text,
+            message = await query.message.reply_text(
+                follow_up_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             self.add_message_to_cleanup(user_id, message.message_id)
@@ -1321,14 +1011,13 @@ class SimplePDFBot:
             error_text = f"❌ Lỗi khi phân tích tài liệu: {str(e)}\n\nVui lòng thử lại." if is_vietnamese else f"❌ Error analyzing document: {str(e)}\n\nPlease try again."
             back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
             
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=query.message.message_id,
-                text=error_text,
+            message = await query.message.reply_text(
+                error_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(back_text, callback_data="menu_back")
                 ]])
             )
+            self.add_message_to_cleanup(user_id, message.message_id)
             
             return MAIN_MENU
     
@@ -1343,9 +1032,8 @@ class SimplePDFBot:
             no_doc_text = "❗ Chưa chọn tài liệu. Vui lòng tải lên hoặc chọn một tài liệu trước." if is_vietnamese else "❗ No document selected. Please upload or select a document first."
             back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
             
-            message = await self.send_safe_message(
-                chat_id=update.effective_chat.id,
-                text=no_doc_text,
+            message = await update.message.reply_text(
+                no_doc_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(back_text, callback_data="menu_back")
                 ]])
@@ -1364,10 +1052,7 @@ class SimplePDFBot:
         # Indicate processing
         processing_text = f"⏳ Đang phân tích tài liệu: {file_name}...\n\nQuá trình này có thể mất một phút tùy thuộc vào kích thước và độ phức tạp của tài liệu." if is_vietnamese else f"⏳ Analyzing document: {file_name}...\n\nThis may take a minute depending on the size and complexity of your document."
         
-        processing_message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=processing_text
-        )
+        processing_message = await update.message.reply_text(processing_text)
         self.add_message_to_cleanup(user_id, processing_message.message_id)
         
         # Analyze the document
@@ -1380,25 +1065,32 @@ class SimplePDFBot:
             
             # Delete processing message
             try:
-                await self.application.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=processing_message.message_id
-                )
+                await processing_message.delete()
                 # Remove from cleanup list
                 if processing_message.message_id in self.user_data[user_id]["messages"]:
                     self.user_data[user_id]["messages"].remove(processing_message.message_id)
-            except Exception as e:
-                logger.info(f"Could not delete processing message: {e}")
+            except Exception:
+                pass
             
-            # Send results as a new message
+            # Split response if it's too long
             result_title = "📝 <b>Kết quả phân tích</b>" if is_vietnamese else "📝 <b>Analysis Results</b>"
             
-            # Use the new split and send method
-            await self.split_and_send_long_message(
-                update=update,
-                text=response,
-                title=result_title
-            )
+            if len(response) > 4000:
+                chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                for i, chunk in enumerate(chunks):
+                    part_text = f"{result_title} (phần {i+1}/{len(chunks)})" if is_vietnamese else f"{result_title} (part {i+1}/{len(chunks)})"
+                    
+                    message = await update.message.reply_text(
+                        f"{part_text}\n\n{chunk}",
+                        parse_mode="HTML"
+                    )
+                    self.add_message_to_cleanup(user_id, message.message_id)
+            else:
+                message = await update.message.reply_text(
+                    f"{result_title}\n\n{response}",
+                    parse_mode="HTML"
+                )
+                self.add_message_to_cleanup(user_id, message.message_id)
             
             # Offer follow-up options
             if is_vietnamese:
@@ -1415,9 +1107,8 @@ class SimplePDFBot:
                 [InlineKeyboardButton(back_button, callback_data="menu_back")]
             ]
             
-            message = await self.send_safe_message(
-                chat_id=update.effective_chat.id,
-                text=follow_up_text,
+            message = await update.message.reply_text(
+                follow_up_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             self.add_message_to_cleanup(user_id, message.message_id)
@@ -1428,10 +1119,7 @@ class SimplePDFBot:
             
             # Delete processing message
             try:
-                await self.application.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=processing_message.message_id
-                )
+                await processing_message.delete()
                 # Remove from cleanup list
                 if processing_message.message_id in self.user_data[user_id]["messages"]:
                     self.user_data[user_id]["messages"].remove(processing_message.message_id)
@@ -1441,9 +1129,8 @@ class SimplePDFBot:
             error_text = f"❌ Lỗi khi phân tích tài liệu: {str(e)}\n\nVui lòng thử lại." if is_vietnamese else f"❌ Error analyzing document: {str(e)}\n\nPlease try again."
             back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
             
-            message = await self.send_safe_message(
-                chat_id=update.effective_chat.id,
-                text=error_text,
+            message = await update.message.reply_text(
+                error_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(back_text, callback_data="menu_back")
                 ]])
@@ -1466,10 +1153,7 @@ class SimplePDFBot:
         # Download the file
         downloading_text = f"⏳ Đang tải xuống {file_name}...\n\nVui lòng đợi trong khi tôi xử lý tài liệu của bạn." if is_vietnamese else f"⏳ Downloading {file_name}...\n\nPlease wait while I process your document."
         
-        message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=downloading_text
-        )
+        message = await update.message.reply_text(downloading_text)
         self.add_message_to_cleanup(user_id, message.message_id)
         
         telegram_file = await context.bot.get_file(file.file_id)
@@ -1485,11 +1169,7 @@ class SimplePDFBot:
             uploading_text = f"⏳ Đang tải {file_name} lên Google AI để phân tích..." if is_vietnamese else f"⏳ Uploading {file_name} to Google AI for analysis..."
             
             # Update the message instead of sending a new one
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=message.message_id,
-                text=uploading_text
-            )
+            await message.edit_text(uploading_text)
             
             file_ref = await self.upload_pdf(file_content)
             
@@ -1521,10 +1201,8 @@ class SimplePDFBot:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             # Update the message instead of sending a new one
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=message.message_id,
-                text=success_text,
+            await message.edit_text(
+                success_text,
                 reply_markup=reply_markup
             )
             
@@ -1537,10 +1215,8 @@ class SimplePDFBot:
             back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
             
             # Update the message instead of sending a new one
-            await self.edit_safe_message(
-                chat_id=update.effective_chat.id,
-                message_id=message.message_id,
-                text=error_text,
+            await message.edit_text(
+                error_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(back_text, callback_data="menu_back")
                 ]])
@@ -1562,9 +1238,8 @@ class SimplePDFBot:
         text = "Vui lòng sử dụng các nút menu hoặc lệnh.\n\nGõ /help để xem các lệnh có sẵn." if is_vietnamese else "Please use the menu buttons or commands.\n\nType /help to see available commands."
         back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
         
-        message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=text,
+        message = await update.message.reply_text(
+            text,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(back_text, callback_data="menu_back")
             ]])
@@ -1581,9 +1256,8 @@ class SimplePDFBot:
         text = "Tôi đang đợi bạn tải lên tài liệu PDF.\n\nVui lòng gửi cho tôi một tệp PDF hoặc gõ /back để quay lại menu chính." if is_vietnamese else "I'm waiting for you to upload a PDF document.\n\nPlease send me a PDF file or type /back to return to the main menu."
         back_text = "🔙 Quay lại Menu" if is_vietnamese else "🔙 Back to Menu"
         
-        message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=text,
+        message = await update.message.reply_text(
+            text,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(back_text, callback_data="menu_back")
             ]])
@@ -1603,10 +1277,7 @@ class SimplePDFBot:
         
         text = "Đã hủy thao tác. Gõ /start để bắt đầu lại." if is_vietnamese else "Operation cancelled. Type /start to begin again."
         
-        message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=text
-        )
+        message = await update.message.reply_text(text)
         self.add_message_to_cleanup(user_id, message.message_id)
         
         return ConversationHandler.END
@@ -1657,10 +1328,7 @@ class SimplePDFBot:
                 "• Large documents may take longer to analyze\n"
             )
         
-        message = await self.send_safe_message(
-            chat_id=update.effective_chat.id,
-            text=help_text
-        )
+        message = await update.message.reply_html(help_text)
         self.add_message_to_cleanup(user_id, message.message_id)
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1674,19 +1342,15 @@ class SimplePDFBot:
             error_text = "❌ Xin lỗi, đã xảy ra lỗi khi xử lý yêu cầu của bạn.\n\nVui lòng thử lại hoặc gõ /start để khởi động lại bot." if is_vietnamese else "❌ Sorry, an error occurred while processing your request.\n\nPlease try again or type /start to restart the bot."
             restart_text = "🔄 Khởi động lại" if is_vietnamese else "🔄 Restart"
             
-            try:
-                message = await self.send_safe_message(
-                    chat_id=update.effective_chat.id,
-                    text=error_text,
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton(restart_text, callback_data="menu_back")
-                    ]])
-                )
-                
-                if user_id in self.user_data:
-                    self.add_message_to_cleanup(user_id, message.message_id)
-            except Exception as e:
-                logger.error(f"Error sending error message: {e}")
+            message = await update.effective_message.reply_text(
+                error_text,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(restart_text, callback_data="menu_back")
+                ]])
+            )
+            
+            if user_id in self.user_data:
+                self.add_message_to_cleanup(user_id, message.message_id)
     
     async def _download_telegram_file(self, file_path: str) -> bytes:
         """Download a file from Telegram."""
