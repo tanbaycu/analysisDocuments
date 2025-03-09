@@ -1,0 +1,5 @@
+python-telegram-bot
+google-generativeai
+deep-translator
+httpx
+google.genai
